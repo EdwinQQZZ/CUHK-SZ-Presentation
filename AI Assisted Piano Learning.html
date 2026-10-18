@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Integrating AI Piano Learning Software with Traditional Piano Teaching</title>
+
+    <!-- Fonts: Cormorant Garamond (display) + IBM Plex Sans (body), via Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,500;0,600;1,400;1,500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+
+    <style>
+        /* ===========================================
+           THEME: change these variables to re-color the whole deck
+           =========================================== */
+        :root {
+            --stage-bg: #070707;
+            --slide-bg: #0e0d0c;
+            --ink: #ece7e1;
+            --muted: #a29d97;
+            --warm: #d4a574;      /* gold-terracotta accent */
+            --pink: #e8b4b8;      /* secondary accent */
+            --good: #9ccfb0;      /* "correct" in the feedback demo */
+            --bad: #ea7a7a;       /* "error" in the feedback demo */
+            --line: rgba(236, 231, 225, 0.16);
+            --card: rgba(236, 231, 225, 0.045);
+
+            --font-display: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'IBM Plex Sans', sans-serif;
+
+            --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+            --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+            --duration-normal: 0.8s;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        /* ===========================================
+           FIXED 16:9 STAGE: MANDATORY BASE STYLES
+           Slides are authored at 1920x1080 and scaled as a whole.
+           =========================================== */
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            background: var(--stage-bg, #000);
+        }
+
+        .deck-viewport {
+            position: fixed;
+            inset: 0;
+            overflow: hidden;
+            background: var(--stage-bg, #000);
+        }
+
+        .deck-stage {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+            transform-origin: 0 0;
+            background: var(--slide-bg, #fff);
+        }
+
+        .slide {
+            position: absolute;
+            inset: 0;
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+            display: block;
+            visibility: hidden;
+            opacity: 0;
+            pointer-events: none;
+            background: var(--slide-bg, #fff);
+        }
+
+        .slide.active,
+        .slide.visible {
+            visibility: visible;
+            opacity: 1;
+            pointer-events: auto;
+            z-index: 1;
+        }
+
+        img, video, canvas, svg { max-width: 100%; max-height: 100%; }
+
+        .deck-controls {
+            position: fixed;
+            left: 50%;
+            bottom: 22px;
+            transform: translateX(-50%);
+            z-index: 1000;
+        }
+
+        @media print {
+            html, body { width: 1920px; height: auto; overflow: visible; background: #fff; }
+            .deck-viewport { position: static; overflow: visible; background: #fff; }
+            .deck-stage { position: static; width: auto; height: auto; transform: none !important; background: none; }
+            .slide {
+                position: relative;
+                display: block !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+                pointer-events: auto !important;
+                width: 1920px;
+                height: 1080px;
+                break-after: page;
+                page-break-after: always;
+            }
+            .slide:last-child { break-after: auto; page-break-after: auto; }
+            .deck-controls, .wipe, .spot, .progress, .timer { display: none !important; }
+            .reveal, .frag, .frag .chip, .wd > span { opacity: 1 !important; transform: none !important; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                transition-duration: 0.2s !important;
+            }
+        }
+
+        /* ===========================================
+           SHARED SLIDE STYLES
+           =========================================== */
+        .slide {
+            color: var(--ink);
+            font-family: var(--font-body);
+            font-weight: 300;
+        }
+
+        /* Atmosphere: soft overlapping glows in two corners */
+        .slide::before {
+            content: "";
+            position: absolute;
+            right: -260px; top: -300px;
+            width: 900px; height: 900px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(212, 165, 116, 0.20) 0%, rgba(212, 165, 116, 0) 68%);
+            pointer-events: none;
+        }
+        .slide::after {
+            content: "";
+            position: absolute;
+            left: -300px; bottom: -380px;
+            width: 900px; height: 900px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(232, 180, 184, 0.13) 0%, rgba(232, 180, 184, 0) 68%);
+            pointer-events: none;
+        }
+
+        .eyebrow {
+            position: absolute;
+            left: 140px; top: 96px;
+            font-size: 24px;
+            font-weight: 500;
+            letter-spacing: 0.22em;
+            text-transform: uppercase;
+            color: var(--warm);
+        }
+
+        h2 {
+            position: absolute;
+            left: 140px; top: 148px;
+            width: 1640px;
+            font-family: var(--font-display);
+            font-weight: 500;
+            font-size: 100px;
+            line-height: 1.04;
+            letter-spacing: -0.01em;
+        }
+        h2 em, h1 em { font-style: italic; font-weight: 400; color: var(--warm); }
+
+        /* Footer chrome: short title + page number */
+        .foot {
+            position: absolute;
+            left: 140px; right: 140px; bottom: 50px;
+            display: flex; justify-content: space-between;
+            font-size: 20px;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: rgba(236, 231, 225, 0.38);
+        }
+
+        /* ---- ANIMATION 1: headline words rise out of a mask ---- */
+        .wd {
+            display: inline-block;
+            overflow: hidden;
+            vertical-align: top;
+            padding: 0 0.08em 0.14em;
+            margin: 0 -0.08em -0.14em;
+        }
+        .wd > span {
+            display: inline-block;
+            transform: translateY(118%);
+            transition: transform 0.95s var(--ease-out-expo);
+            transition-delay: calc(var(--i, 0) * 70ms + 120ms);
+        }
+        .slide.visible .wd > span { transform: translateY(0); }
+
+        /* ---- ANIMATION 2: generic fade-and-rise, staggered ---- */
+        .reveal {
+            opacity: 0;
+            transform: translateY(34px);
+            transition: opacity var(--duration-normal) var(--ease-out-expo),
+                        transform var(--duration-normal) var(--ease-out-expo);
+        }
+        .slide.visible .reveal { opacity: 1; transform: translateY(0); }
+        .slide.visible .d1 { transition-delay: 0.10s; }
+        .slide.visible .d2 { transition-delay: 0.24s; }
+        .slide.visible .d3 { transition-delay: 0.38s; }
+        .slide.visible .d4 { transition-delay: 0.52s; }
+        .slide.visible .d5 { transition-delay: 0.66s; }
+
+        /* ---- ANIMATION 3: click-to-build fragments (press → to reveal) ---- */
+        .frag {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: opacity 0.7s var(--ease-out-expo), transform 0.7s var(--ease-out-expo);
+        }
+        .frag.on { opacity: 1; transform: translateY(0); }
+        .frag .chip, .frag .stagger {
+            opacity: 0;
+            transform: translateY(24px) scale(0.96);
+            transition: opacity 0.6s var(--ease-out-expo), transform 0.6s var(--ease-spring);
+        }
+        .frag.on .chip, .frag.on .stagger {
+            opacity: 1;
+            transform: none;
+            transition-delay: calc(var(--k, 0) * 110ms + 120ms);
+        }
+        body.editing .frag, body.editing .frag .chip, body.editing .frag .stagger { opacity: 1; transform: none; }
+
+        /* Generic card + helpers */
+        .abs { position: absolute; }
+        .card {
+            background: var(--card);
+            border-top: 2px solid var(--warm);
+            padding: 40px 44px;
+        }
+        .num { font-family: var(--font-body); font-style: normal; font-weight: 300; font-variant-numeric: lining-nums; font-size: 0.9em; letter-spacing: 0.02em; }
+        em .num { font-weight: 300; }
+        .label {
+            font-size: 24px;
+            font-weight: 500;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: var(--warm);
+        }
+
+        /* ===========================================
+           PIANO KEYS (title slide): clickable, with sound
+           =========================================== */
+        .keys {
+            position: absolute;
+            left: 0; right: 0; bottom: 0;
+            height: 150px;
+            overflow: hidden;
+            z-index: 5;
+        }
+        .keys .w {
+            position: absolute; top: 0; bottom: 0; width: 60px;
+            background: rgba(236, 231, 225, 0.34);
+            border-right: 3px solid var(--slide-bg);
+            cursor: pointer;
+            transition: background 0.35s ease, transform 0.12s ease;
+        }
+        .keys .w:hover { background: rgba(232, 180, 184, 0.7); }
+        .keys .w.lit, .keys .w.down { background: var(--warm); transition-duration: 0.05s; }
+        .keys .w.down { transform: translateY(5px); }
+        .keys .b {
+            position: absolute; top: 0; height: 92px; width: 34px;
+            background: var(--slide-bg);
+            border-radius: 0 0 4px 4px;
+            z-index: 2;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+        .keys .b:hover { background: #2b2420; }
+        .keys .b.down { background: var(--warm); }
+        .key-hint {
+            position: absolute; right: 140px; bottom: 176px;
+            font-size: 22px; letter-spacing: 0.16em; text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        /* ===========================================
+           SLIDE 1: TITLE
+           =========================================== */
+        .s1 .eyebrow { top: 130px; }
+        .s1 h1 {
+            position: absolute;
+            left: 140px; top: 200px;
+            width: 1500px;
+            font-family: var(--font-display);
+            font-weight: 500;
+            font-size: 112px;
+            line-height: 1.04;
+            letter-spacing: -0.015em;
+            text-wrap: balance;
+        }
+        .s1 .rule { position: absolute; left: 140px; top: 640px; width: 120px; height: 2px; background: var(--warm); }
+        .s1 .who { position: absolute; left: 140px; top: 686px; }
+        .s1 .who .name { font-family: var(--font-display); font-size: 70px; font-weight: 500; line-height: 1.1; }
+        .s1 .who .aff { margin-top: 18px; font-size: 38px; color: var(--ink); }
+
+        /* ===========================================
+           SLIDE 2: CONTEXT + QUESTIONS
+           =========================================== */
+        .s2 .col { position: absolute; top: 330px; width: 780px; height: 400px; opacity: 0; transition: opacity 1s var(--ease-out-expo), transform 1.1s var(--ease-out-expo); }
+        .s2 .col.l { left: 140px; transform: translateX(-140px); }
+        .s2 .col.r { left: 1000px; transform: translateX(140px); }
+        .slide.visible .s2 .col, .s2.visible .col { transform: translateX(0); opacity: 1; transition-delay: 0.15s; }
+        .s2 .col h3 { font-family: var(--font-display); font-weight: 500; font-size: 62px; line-height: 1.1; margin-bottom: 24px; }
+        .s2 .col li { list-style: none; font-size: 34px; line-height: 1.3; padding: 15px 0; border-top: 1px solid var(--line); }
+        .s2 .bridge {
+            position: absolute; left: 900px; top: 490px;
+            width: 120px; height: 120px;
+            border: 2px solid var(--warm); border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-family: var(--font-display); font-size: 76px; color: var(--warm);
+            background: var(--slide-bg); z-index: 2;
+            transform: scale(0);
+            transition: transform 0.8s var(--ease-spring) 0.9s;
+        }
+        .slide.visible .bridge { transform: scale(1); animation: pulse 2.6s ease-in-out 2s infinite; }
+        @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(212, 165, 116, 0.4); } 50% { box-shadow: 0 0 0 26px rgba(212, 165, 116, 0); } }
+        .s2 .rqs { position: absolute; left: 140px; top: 780px; width: 1640px; }
+        .s2 .rqs .row { display: grid; grid-template-columns: repeat(3, 520px); gap: 40px; margin-top: 16px; }
+        .s2 .rq { display: flex; gap: 22px; align-items: baseline; }
+        .s2 .rq .n { font-family: var(--font-body); font-variant-numeric: lining-nums; font-weight: 300; font-size: 72px; line-height: 1; color: var(--warm); }
+        .s2 .rq p { font-size: 34px; line-height: 1.3; }
+
+        /* ===========================================
+           SLIDE 3: STUDY DESIGN
+           =========================================== */
+        .s3 .app { position: absolute; top: 340px; width: 520px; height: 190px; padding: 34px 40px; }
+        .s3 .app .nm { font-family: var(--font-display); font-size: 62px; font-weight: 500; line-height: 1.05; }
+        .s3 .app .sb { margin-top: 12px; font-size: 30px; color: var(--muted); }
+        .s3 .dimwrap { position: absolute; left: 140px; top: 566px; width: 1640px; }
+        .s3 .dims { display: grid; grid-template-columns: repeat(3, 520px); gap: 20px 40px; margin-top: 18px; }
+        .s3 .chip {
+            height: 80px; border: 1px solid var(--warm);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 32px; text-align: center;
+        }
+        .s3 .bench { position: absolute; left: 140px; top: 850px; width: 1640px; }
+        .s3 .bench .b1 { font-size: 34px; line-height: 1.4; }
+        .s3 .bench .b1 b { font-weight: 500; color: var(--warm); }
+        .s3 .bench .b2 { margin-top: 14px; font-size: 30px; color: var(--muted); }
+
+        /* ===========================================
+           SLIDE 4: FEEDBACK SIMULATION
+           =========================================== */
+        .s4 .stat { position: absolute; left: 140px; top: 274px; font-size: 34px; color: var(--muted); display: flex; align-items: baseline; gap: 20px; }
+        .s4 .stat b { font-family: var(--font-body); font-variant-numeric: lining-nums; font-weight: 300; font-size: 60px; color: var(--warm); line-height: 1; }
+        .s4 .legend { position: absolute; right: 140px; top: 296px; font-size: 24px; color: var(--muted); display: flex; gap: 34px; }
+        .s4 .legend i { display: inline-block; width: 18px; height: 18px; border-radius: 50%; margin-right: 10px; vertical-align: -2px; }
+        .s4 .lanes { position: absolute; left: 140px; top: 380px; width: 1640px; }
+        .s4 .lane { position: relative; height: 170px; border-top: 1px solid var(--line); }
+        .s4 .lname { position: absolute; left: 0; top: 30px; width: 330px; }
+        .s4 .lname .nm { font-family: var(--font-display); font-size: 50px; font-weight: 500; line-height: 1.05; }
+        .s4 .lname .sb { margin-top: 8px; font-size: 26px; color: var(--muted); }
+        .s4 .track { position: absolute; left: 360px; top: 0; width: 1280px; height: 170px; }
+        .s4 .staff { position: absolute; left: 0; right: 0; top: 64px; height: 2px; background: rgba(236, 231, 225, 0.28); }
+        .s4 .note {
+            position: absolute; top: 46px; width: 38px; height: 38px;
+            border: 2px solid var(--ink); border-radius: 50%;
+            transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s var(--ease-spring);
+        }
+        .s4 .note.on { background: var(--warm); border-color: var(--warm); transform: scale(1.15); }
+        .s4 .note.ok { background: var(--good); border-color: var(--good); transform: scale(1.1); }
+        .s4 .note.bad { background: var(--bad); border-color: var(--bad); transform: scale(1.3); }
+        .s4 .head {
+            position: absolute; top: 24px; width: 3px; height: 82px;
+            background: var(--warm); left: 20px;
+            box-shadow: 0 0 18px rgba(212, 165, 116, 0.8);
+            transition: left 0.5s linear;
+        }
+        .s4 .say { position: absolute; left: 60px; top: 116px; font-size: 28px; opacity: 0; transition: opacity 0.4s ease; display: flex; gap: 12px; align-items: center; }
+        .s4 .say.show { opacity: 1; }
+        .s4 .say.bad { color: var(--bad); }
+        .s4 .say.good { color: var(--good); }
+        .s4 .say.mute { color: var(--muted); }
+        .s4 .say .tg { font-size: 24px; padding: 3px 14px; border: 1px solid var(--warm); color: var(--warm); }
+
+        /* ===========================================
+           SLIDE 5: CONTENT + MOTIVATION (count-up)
+           =========================================== */
+        .s5 .rp { position: absolute; top: 330px; width: 520px; }
+        .s5 .rp .big { font-family: var(--font-body); font-variant-numeric: lining-nums tabular-nums; font-weight: 300; font-size: 200px; line-height: 1; letter-spacing: 0.05em; color: var(--warm); margin-top: 12px; }
+        .s5 .rp .unit { font-family: var(--font-display); font-size: 44px; font-style: italic; margin-top: 4px; }
+        .s5 .rp .p { margin-top: 10px; font-size: 31px; line-height: 1.4; }
+        .s5 .rp .m { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); }
+        .s5 .rp .m .label { color: var(--pink); font-size: 22px; }
+        .s5 .rp .m p { margin-top: 8px; font-size: 31px; line-height: 1.4; }
+
+        /* ===========================================
+           SLIDE 6: STRONG vs BLIND
+           =========================================== */
+        .s6 .sub { position: absolute; left: 140px; top: 268px; font-size: 32px; color: var(--muted); }
+        .s6 .col { position: absolute; top: 370px; width: 780px; }
+        .s6 .col.l { left: 140px; }
+        .s6 .col.r { left: 1000px; }
+        .s6 .col li { list-style: none; display: flex; align-items: center; gap: 28px; font-family: var(--font-display); font-size: 56px; font-weight: 500; line-height: 1.1; padding: 30px 0; border-top: 1px solid var(--line); }
+        .s6 .col .label { margin-bottom: 16px; }
+        .s6 .col.r .label { color: var(--pink); }
+        .s6 .mk { flex: none; width: 54px; height: 54px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--font-body); font-size: 30px; border: 2px solid; }
+        .s6 .col.l .mk { color: var(--good); border-color: var(--good); }
+        .s6 .col.r .mk { color: var(--bad); border-color: var(--bad); }
+        .s6 .vline { position: absolute; left: 960px; top: 380px; width: 2px; height: 560px; background: var(--line); transform: scaleY(0); transform-origin: top; transition: transform 1.1s var(--ease-out-expo) 0.5s; }
+        .slide.visible .vline { transform: scaleY(1); }
+
+        /* ===========================================
+           SLIDE 7: HYBRID MODEL
+           =========================================== */
+        .s7 .lanelabel { position: absolute; left: 140px; font-size: 24px; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; }
+        .s7 .st { position: absolute; padding: 28px 30px; }
+        .s7 .st h3 { font-family: var(--font-display); font-weight: 500; font-size: 44px; line-height: 1.08; white-space: nowrap; }
+        .s7 .st h3 span { font-family: var(--font-body); font-variant-numeric: lining-nums; font-weight: 300; font-size: 0.9em; color: var(--warm); margin-right: 14px; }
+        .s7 .st p { margin-top: 12px; font-size: 29px; line-height: 1.4; color: var(--muted); }
+        .s7 .st.lesson { border-top-color: var(--pink); background: rgba(232, 180, 184, 0.07); }
+        .s7 .st.lesson h3 span { color: var(--pink); }
+        .s7 .trail { position: absolute; left: 140px; top: 369px; width: 1640px; height: 3px; background: linear-gradient(90deg, var(--warm), rgba(212, 165, 116, 0.2)); transform: scaleX(0); transform-origin: left; transition: transform 1.6s var(--ease-out-expo) 0.4s; }
+        .slide.visible .trail { transform: scaleX(1); }
+
+        /* ===========================================
+           SLIDE 8: CREATIVE USE (two animated examples)
+           =========================================== */
+        .s8c .sub { position: absolute; left: 140px; top: 268px; font-size: 32px; color: var(--muted); }
+        .s8c .ex { position: absolute; top: 350px; width: 800px; height: 540px; padding: 34px 40px; }
+        .s8c .ex.a { left: 140px; }
+        .s8c .ex.b { left: 980px; border-top-color: var(--pink); }
+        .s8c .ex .label { font-size: 22px; }
+        .s8c .ex.b .label { color: var(--pink); }
+        .s8c .ex h3 { margin-top: 6px; font-family: var(--font-display); font-weight: 500; font-size: 58px; line-height: 1.1; }
+        .s8c .ex h3 em { font-style: italic; font-weight: 400; color: var(--warm); }
+        .s8c .ex.b h3 em { color: var(--pink); }
+        /* Example 1: three dots swinging at three speeds */
+        .s8c .tempo { margin-top: 22px; }
+        .s8c .tr { display: grid; grid-template-columns: 1fr 300px; align-items: center; gap: 24px; padding: 15px 0; border-top: 1px solid var(--line); }
+        .s8c .tr .t { font-size: 31px; line-height: 1.25; }
+        .s8c .tr .t b { font-family: var(--font-body); font-variant-numeric: lining-nums; font-weight: 300; color: var(--warm); margin-right: 14px; font-size: 38px; }
+        .s8c .rail { position: relative; height: 26px; }
+        .s8c .rail::before { content: ""; position: absolute; left: 0; right: 0; top: 12px; height: 2px; background: rgba(236, 231, 225, 0.28); }
+        .s8c .rail i { position: absolute; top: 0; left: 0; width: 26px; height: 26px; border-radius: 50%; background: var(--warm); }
+        .s8c .rail.ok i { background: var(--good); }
+        .s8c .ex.on .rail i { animation: swing var(--p) ease-in-out infinite alternate; }
+        @keyframes swing { from { left: 0; } to { left: 274px; } }
+        /* Example 2: steps, then ear vs app dot rows */
+        .s8c .steps { margin-top: 14px; }
+        .s8c .steps li { list-style: none; font-size: 31px; line-height: 1.25; padding: 11px 0; border-top: 1px solid var(--line); }
+        .s8c .steps li b { font-family: var(--font-body); font-variant-numeric: lining-nums; font-weight: 300; color: var(--pink); margin-right: 14px; font-size: 38px; }
+        .s8c .cmp { margin-top: 16px; }
+        .s8c .cr { display: flex; align-items: center; gap: 22px; height: 52px; }
+        .s8c .cr .who2 { width: 150px; font-size: 22px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+        .s8c .cr .dots { display: flex; gap: 24px; }
+        .s8c .cr .dots i { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--ink); }
+        .s8c .ex.on .dots i.m { animation: mark 8s ease-in-out infinite; animation-delay: var(--d); }
+        .s8c .ex.on .dots i.miss { animation: mark 8s ease-in-out infinite, ring 8s ease-in-out infinite; animation-delay: var(--d), var(--d); }
+        @keyframes mark { 0%, 4% { background: transparent; border-color: var(--ink); } 9%, 88% { background: var(--bad); border-color: var(--bad); } 96%, 100% { background: transparent; border-color: var(--ink); } }
+        @keyframes ring { 0%, 6% { box-shadow: 0 0 0 0 rgba(232, 180, 184, 0); } 14%, 40% { box-shadow: 0 0 0 10px rgba(232, 180, 184, 0.45); } 60%, 100% { box-shadow: 0 0 0 0 rgba(232, 180, 184, 0); } }
+        .s8c .more { position: absolute; left: 140px; top: 930px; font-size: 26px; color: var(--muted); }
+        .s8c .more b { font-weight: 500; color: var(--warm); letter-spacing: 0.14em; text-transform: uppercase; font-size: 22px; margin-right: 14px; }
+
+        /* ===========================================
+           SLIDE 8: CONCLUSION (venn) + THANK YOU
+           =========================================== */
+        .s8 .venn { position: absolute; left: 140px; top: 330px; width: 860px; height: 520px; }
+        .s8 .c { position: absolute; top: 10px; width: 500px; height: 500px; border-radius: 50%; transition: transform 1.5s var(--ease-out-expo) 0.4s; }
+        .s8 .c1 { left: 0; border: 2px solid var(--warm); background: rgba(212, 165, 116, 0.10); transform: translateX(-110px); }
+        .s8 .c2 { left: 316px; border: 2px solid var(--pink); background: rgba(232, 180, 184, 0.10); transform: translateX(110px); }
+        .slide.visible .c1, .slide.visible .c2 { transform: translateX(0); }
+        .s8 .vl { position: absolute; top: 230px; font-family: var(--font-display); font-size: 58px; font-weight: 500; }
+        .s8 .vl.a { left: 70px; }
+        .s8 .vl.b { left: 586px; }
+        .s8 .vl.h { left: 316px; width: 184px; text-align: center; font-style: italic; color: var(--ink); font-size: 46px; opacity: 0; transition: opacity 0.9s ease 1.6s; }
+        .slide.visible .vl.h { opacity: 1; }
+        .s8 .pts { position: absolute; left: 1090px; top: 350px; width: 690px; }
+        .s8 .pt { padding: 24px 0; border-top: 1px solid var(--line); }
+        .s8 .pt .label { font-size: 22px; }
+        .s8 .pt p { margin-top: 8px; font-size: 36px; line-height: 1.3; }
+        .s8 .thanks { position: absolute; left: 140px; top: 890px; width: 1640px; display: flex; align-items: baseline; gap: 90px; }
+        .s8 .thanks .ty { font-family: var(--font-display); font-weight: 300; font-size: 100px; line-height: 1; }
+        .s8 .thanks .ty em { color: var(--warm); font-style: italic; }
+        .s8 .thanks .nm { font-family: var(--font-display); font-size: 52px; font-weight: 500; }
+        .s8 .thanks .af { font-size: 30px; margin-top: 4px; }
+
+        /* ===========================================
+           DECK CHROME: spotlight, progress, curtain wipe, timer
+           =========================================== */
+        .spot {
+            position: absolute; left: 0; top: 0; width: 900px; height: 900px; margin: -450px 0 0 -450px;
+            border-radius: 50%; pointer-events: none; z-index: 25; opacity: 0;
+            background: radial-gradient(circle, rgba(236, 231, 225, 0.075) 0%, rgba(236, 231, 225, 0) 62%);
+            mix-blend-mode: screen; transition: opacity 0.6s ease;
+        }
+        .progress { position: absolute; left: 0; top: 0; height: 5px; width: 0; background: var(--warm); z-index: 20; transition: width 0.9s var(--ease-out-expo); }
+        .wipe {
+            position: absolute; inset: 0; z-index: 30; pointer-events: none;
+            background: linear-gradient(90deg, #0e0d0c 0, #0e0d0c calc(100% - 12px), var(--warm) calc(100% - 12px));
+            transform: translateX(-101%);
+        }
+        .wipe.run { animation: wipe 0.7s cubic-bezier(0.76, 0, 0.24, 1); }
+        @keyframes wipe { 0% { transform: translateX(-101%); } 50% { transform: translateX(0); } 100% { transform: translateX(101%); } }
+
+        .timer {
+            position: fixed; top: 16px; right: 20px; z-index: 2000; display: none;
+            font-family: var(--font-body); font-size: 26px; font-weight: 500; letter-spacing: 0.1em;
+            color: var(--ink); background: rgba(0, 0, 0, 0.55); padding: 6px 16px; border-radius: 8px;
+        }
+        .timer.show { display: block; }
+        .timer.low { color: var(--warm); }
+        .timer.over { color: var(--bad); }
+
+        .edit-hotzone { position: fixed; top: 0; left: 0; width: 80px; height: 80px; z-index: 10000; cursor: pointer; }
+        .edit-toggle {
+            position: fixed; top: 14px; left: 14px;
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.3s ease;
+            z-index: 10001;
+            background: #fff; border: 0; border-radius: 8px;
+            padding: 8px 12px; font-size: 16px; cursor: pointer;
+        }
+        .edit-toggle.show, .edit-toggle.active { opacity: 1; pointer-events: auto; }
+        body.editing [contenteditable="true"] { outline: 2px dashed rgba(212, 165, 116, 0.8); outline-offset: 6px; }
+    </style>
+</head>
+<body>
+    <div class="deck-viewport">
+        <main class="deck-stage" id="deckStage">
+
+            <!-- === 01 TITLE === -->
+            <section class="slide s1 active" data-hook="keys" aria-label="Title">
+                <div class="eyebrow reveal d1">Research presentation</div>
+                <h1 class="split">Integrating <em>AI</em> Piano Learning Software with Traditional Piano Teaching</h1>
+                <div class="rule reveal d3"></div>
+                <div class="who reveal d4">
+                    <div class="name">Qinquan Zhang</div>
+                    <div class="aff">Music Department, Dongguan University of Technology</div>
+                </div>
+                <div class="key-hint reveal d5">Click the keys</div>
+                <div class="keys" id="keys" data-keys="32"></div>
+            </section>
+
+            <!-- === 02 CONTEXT + RESEARCH QUESTIONS === -->
+            <section class="slide s2" aria-label="Context">
+                <div class="eyebrow reveal d1">01 · Context</div>
+                <h2 class="split"><span class="num">2</span> ways to learn <em><span class="num">1</span> instrument</em></h2>
+                <div class="col l card">
+                    <h3>Traditional teaching</h3>
+                    <ul>
+                        <li>Personalized feedback</li>
+                        <li>Structured pedagogy</li>
+                        <li>Mentorship and artistic modeling</li>
+                    </ul>
+                </div>
+                <div class="bridge">+</div>
+                <div class="col r card">
+                    <h3>Piano learning software</h3>
+                    <ul>
+                        <li>Accessibility</li>
+                        <li>Immediate feedback</li>
+                        <li>Gamification</li>
+                    </ul>
+                </div>
+                <div class="rqs frag">
+                    <div class="label">3 research questions</div>
+                    <div class="row">
+                        <div class="rq stagger" style="--k:0"><span class="n">1</span><p>Strengths of the leading apps</p></div>
+                        <div class="rq stagger" style="--k:1"><span class="n">2</span><p>Limitations and challenges</p></div>
+                        <div class="rq stagger" style="--k:2"><span class="n">3</span><p>Integration with traditional teaching</p></div>
+                    </div>
+                </div>
+                <div class="foot"><span>Integrating AI Piano Learning Software with Traditional Piano Teaching</span><span>02 / 09</span></div>
+            </section>
+
+            <!-- === 03 STUDY DESIGN === -->
+            <section class="slide s3" aria-label="Study design">
+                <div class="eyebrow reveal d1">02 · Method</div>
+                <h2 class="split"><span class="num">3</span> apps, <em><span class="num">6</span> dimensions</em></h2>
+
+                <div class="app card reveal d2" style="left:140px"><div class="nm">Simply Piano</div><div class="sb">Self-paced courses · 11 levels</div></div>
+                <div class="app card reveal d3" style="left:700px"><div class="nm">Skoove</div><div class="sb">Self-paced courses · 7 levels</div></div>
+                <div class="app card reveal d4" style="left:1260px"><div class="nm">XiaoYeZi</div><div class="sb">Method books and exam syllabi</div></div>
+
+                <div class="dimwrap frag">
+                    <div class="label">Evaluated on</div>
+                    <div class="dims">
+                        <div class="chip" style="--k:0">Interactive feedback</div>
+                        <div class="chip" style="--k:1">Multimedia quality</div>
+                        <div class="chip" style="--k:2">Gamification</div>
+                        <div class="chip" style="--k:3">Progression</div>
+                        <div class="chip" style="--k:4">Motivation</div>
+                        <div class="chip" style="--k:5">Repertoire</div>
+                    </div>
+                </div>
+
+                <div class="bench frag">
+                    <div class="b1"><b>Benchmark:</b> Jacobson, <i>Professional Piano Teaching</i> (2006), elementary-level pedagogy</div>
+                    <div class="b2">Beginner-level instruction · app versions available before March 2025</div>
+                </div>
+                <div class="foot"><span>Integrating AI Piano Learning Software with Traditional Piano Teaching</span><span>03 / 09</span></div>
+            </section>
+
+            <!-- === 04 FEEDBACK SIMULATION === -->
+            <section class="slide s4" aria-label="Feedback">
+                <div class="eyebrow reveal d1">03 · Findings</div>
+                <h2 class="split"><span class="num">1</span> mistake, <em><span class="num">3</span> responses</em></h2>
+                <div class="stat reveal d2"><b>&lt; 1 s</b><span>to recognize a note, with no errors, on an acoustic piano</span></div>
+                <div class="legend reveal d2"><span><i style="background:var(--good)"></i>correct</span><span><i style="background:var(--bad)"></i>error</span></div>
+
+                <div class="lanes reveal d3">
+                    <div class="lane" data-kind="simply">
+                        <div class="lname"><div class="nm">Simply Piano</div><div class="sb">Immediate feedback</div></div>
+                        <div class="track"><div class="staff"></div><div class="head"></div><div class="say"></div></div>
+                    </div>
+                    <div class="lane" data-kind="xiaoyezi">
+                        <div class="lname"><div class="nm">XiaoYeZi</div><div class="sb">Report after playing</div></div>
+                        <div class="track"><div class="staff"></div><div class="head"></div><div class="say"></div></div>
+                    </div>
+                    <div class="lane" data-kind="skoove">
+                        <div class="lname"><div class="nm">Skoove</div><div class="sb">Play along with video</div></div>
+                        <div class="track"><div class="staff"></div><div class="head"></div><div class="say"></div></div>
+                    </div>
+                </div>
+                <div class="foot"><span>Integrating AI Piano Learning Software with Traditional Piano Teaching</span><span>04 / 09</span></div>
+            </section>
+
+            <!-- === 05 CONTENT + MOTIVATION === -->
+            <section class="slide s5" aria-label="Content and motivation">
+                <div class="eyebrow reveal d1">03 · Findings</div>
+                <h2 class="split">Content and <em>motivation</em></h2>
+
+                <div class="rp reveal d2" style="left:140px">
+                    <div class="label">XiaoYeZi</div>
+                    <div class="big count" data-to="13">0</div>
+                    <div class="unit">Chinese exam syllabi</div>
+                    <p class="p">plus ABRSM 1–8 and standard method books</p>
+                    <div class="m"><div class="label">Motivation</div><p>Green-leaf rewards, video sharing, rankings</p></div>
+                </div>
+                <div class="rp reveal d3" style="left:700px">
+                    <div class="label">Simply Piano</div>
+                    <div class="big count" data-to="11">0</div>
+                    <div class="unit">levels</div>
+                    <p class="p">of its own arrangements, from classical to pop and jazz chords</p>
+                    <div class="m"><div class="label">Motivation</div><p>Points and levels, 289.1K-member group</p></div>
+                </div>
+                <div class="rp reveal d4" style="left:1260px">
+                    <div class="label">Skoove</div>
+                    <div class="big count" data-to="7">0</div>
+                    <div class="unit">levels</div>
+                    <p class="p">of its own arrangements, classical and popular</p>
+                    <div class="m"><div class="label">Motivation</div><p>Intrinsic only, no reward system</p></div>
+                </div>
+                <div class="foot"><span>Integrating AI Piano Learning Software with Traditional Piano Teaching</span><span>05 / 09</span></div>
+            </section>
+
+            <!-- === 06 STRONG vs BLIND === -->
+            <section class="slide s6" aria-label="Strengths and gaps">
+                <div class="eyebrow reveal d1">04 · Analysis</div>
+                <h2 class="split">What the apps <em>can and cannot</em> do</h2>
+                <div class="sub reveal d2">Measured against Jacobson's principles for elementary piano</div>
+                <div class="vline"></div>
+                <div class="col l frag">
+                    <div class="label">Can assess</div>
+                    <ul>
+                        <li class="stagger" style="--k:0"><span class="mk">✓</span>Note reading and rhythm</li>
+                        <li class="stagger" style="--k:1"><span class="mk">✓</span>Error correction</li>
+                        <li class="stagger" style="--k:2"><span class="mk">✓</span>Slow, sectioned practice</li>
+                    </ul>
+                </div>
+                <div class="col r frag">
+                    <div class="label">Cannot assess</div>
+                    <ul>
+                        <li class="stagger" style="--k:0"><span class="mk">✕</span>Phrasing and dynamics</li>
+                        <li class="stagger" style="--k:1"><span class="mk">✕</span>Note duration and sustain</li>
+                        <li class="stagger" style="--k:2"><span class="mk">✕</span>Tone production</li>
+                        <li class="stagger" style="--k:3"><span class="mk">✕</span>Fingering and coordination</li>
+                    </ul>
+                </div>
+                <div class="foot"><span>Integrating AI Piano Learning Software with Traditional Piano Teaching</span><span>06 / 09</span></div>
+            </section>
+
+            <!-- === 07 HYBRID MODEL === -->
+            <section class="slide s7" aria-label="Hybrid model">
+                <div class="eyebrow reveal d1">05 · Hybrid model</div>
+                <h2 class="split">A <span class="num">6</span>-step <em>hybrid</em> sequence</h2>
+
+                <div class="lanelabel reveal d2" style="top:322px;color:var(--warm)">At home, with the app</div>
+                <div class="trail"></div>
+                <div class="st card frag" style="left:140px;top:386px;width:380px;height:250px"><h3><span>1</span>Note learning</h3><p>Pitch only, before any rhythm</p></div>
+                <div class="st card frag" style="left:560px;top:386px;width:380px;height:250px"><h3><span>2</span>Score-singing</h3><p>Sing alone, then with the demo</p></div>
+                <div class="st card frag" style="left:980px;top:386px;width:380px;height:250px"><h3><span>3</span>Add rhythm</h3><p>Slow and steady, then gradually faster</p></div>
+                <div class="st card frag" style="left:1400px;top:386px;width:380px;height:250px"><h3><span>4</span>Smoothness</h3><p>Remove pauses, as the style allows</p></div>
+
+                <div class="lanelabel reveal d2" style="top:676px;color:var(--pink)">In the lesson, with the teacher</div>
+                <div class="st card lesson frag" style="left:140px;top:730px;width:800px;height:220px"><h3><span>5</span>Teacher time</h3><p>Fingering, wrist, articulation, dynamics, interpretation</p></div>
+                <div class="st card frag" style="left:980px;top:730px;width:800px;height:220px"><h3><span>6</span>Practice calendar</h3><p>Dates, duration and pieces practiced: teacher and app</p></div>
+                <div class="foot"><span>Integrating AI Piano Learning Software with Traditional Piano Teaching</span><span>07 / 09</span></div>
+            </section>
+
+            <!-- === 08 CREATIVE USE === -->
+            <section class="slide s8c" aria-label="Creative use">
+                <div class="eyebrow reveal d1">06 · Creative use</div>
+                <h2 class="split">Using the features <em>differently</em></h2>
+                <div class="sub reveal d2">Two examples that go beyond the app's original purpose</div>
+
+                <div class="ex a card frag">
+                    <div class="label">Example 1</div>
+                    <h3>Stretch the <em>tempo</em></h3>
+                    <div class="tempo">
+                        <div class="tr"><div class="t"><b>1</b>Slow: precise shifts and preparation</div><div class="rail" style="--p:1.9s"><i></i></div></div>
+                        <div class="tr"><div class="t"><b>2</b>Faster than written: control and agility</div><div class="rail" style="--p:0.55s"><i></i></div></div>
+                        <div class="tr"><div class="t"><b>3</b>Back to the original: now it feels easy</div><div class="rail ok" style="--p:1.05s"><i></i></div></div>
+                    </div>
+                </div>
+
+                <div class="ex b card frag">
+                    <div class="label">Example 2</div>
+                    <h3>Self-assess first, <em>then verify</em></h3>
+                    <ul class="steps">
+                        <li><b>1</b>Play the piece at home</li>
+                        <li><b>2</b>Listen back and identify your own errors</li>
+                        <li><b>3</b>Verify against the app's feedback</li>
+                    </ul>
+                    <div class="cmp" aria-hidden="true">
+                        <div class="cr"><div class="who2">Your ear</div><div class="dots">
+                            <i></i><i></i><i class="m" style="--d:0.8s"></i><i></i><i></i><i class="m" style="--d:1.4s"></i><i></i><i></i></div></div>
+                        <div class="cr"><div class="who2">The app</div><div class="dots">
+                            <i></i><i></i><i class="m" style="--d:3s"></i><i></i><i></i><i class="m" style="--d:3.4s"></i><i class="miss" style="--d:3.9s"></i><i></i></div></div>
+                    </div>
+                </div>
+
+                <div class="more reveal d4"><b>Also in the paper</b>Accompaniment with the singing demo · rhythm tapping · memory practice</div>
+                <div class="foot"><span>Integrating AI Piano Learning Software with Traditional Piano Teaching</span><span>08 / 09</span></div>
+            </section>
+
+            <!-- === 09 CONCLUSION + THANK YOU === -->
+            <section class="slide s8" aria-label="Conclusion">
+                <div class="eyebrow reveal d1">07 · Conclusion</div>
+                <h2 class="split">Not either-or, but <em>synergy</em></h2>
+                <div class="venn" aria-hidden="true">
+                    <div class="c c1"></div>
+                    <div class="c c2"></div>
+                    <div class="vl a">Software</div>
+                    <div class="vl b">Teacher</div>
+                    <div class="vl h">Hybrid</div>
+                </div>
+                <div class="pts">
+                    <div class="pt reveal d3"><div class="label">Software</div><p>Pitch, rhythm and note-reading fluency</p></div>
+                    <div class="pt reveal d4"><div class="label" style="color:var(--pink)">Teacher</div><p>Expression, technique and interpretation</p></div>
+                    <div class="pt reveal d5"><div class="label">Next</div><p>AI-driven expressivity detection; long-term studies</p></div>
+                </div>
+                <div class="thanks reveal d5">
+                    <div class="ty">Thank <em>you</em></div>
+                    <div><div class="nm">Qinquan Zhang</div><div class="af">Music Department, Dongguan University of Technology</div></div>
+                </div>
+            </section>
+
+            <!-- Deck chrome lives inside the stage so it scales with the slides -->
+            <div class="spot" id="spot"></div>
+            <div class="progress" id="progress"></div>
+            <div class="wipe" id="wipe"></div>
+        </main>
+    </div>
+
+    <div class="timer" id="timer">10:00</div>
+    <div class="edit-hotzone"></div>
+    <button class="edit-toggle" id="editToggle" title="Edit mode (E)">✏️</button>
+
+    <script>
+        /* ===========================================
+           HEADLINES: split into words so they can rise one by one
+           =========================================== */
+        function splitWords(node, counter) {
+            [...node.childNodes].forEach(child => {
+                if (child.nodeType === 3) {
+                    const frag = document.createDocumentFragment();
+                    child.textContent.split(/(\s+)/).forEach(part => {
+                        if (!part) return;
+                        if (/^\s+$/.test(part)) { frag.appendChild(document.createTextNode(' ')); return; }
+                        const wd = document.createElement('span'); wd.className = 'wd';
+                        const inner = document.createElement('span');
+                        inner.textContent = part;
+                        inner.style.setProperty('--i', counter.n++);
+                        wd.appendChild(inner); frag.appendChild(wd);
+                    });
+                    child.replaceWith(frag);
+                } else if (child.nodeType === 1 && child.classList.contains('num')) {
+                    const wd = document.createElement('span'); wd.className = 'wd';
+                    const inner = document.createElement('span');
+                    inner.style.setProperty('--i', counter.n++);
+                    child.replaceWith(wd); wd.appendChild(inner); inner.appendChild(child);
+                } else if (child.nodeType === 1) { splitWords(child, counter); }
+            });
+        }
+        document.querySelectorAll('.split').forEach(el => splitWords(el, { n: 0 }));
+
+        /* ===========================================
+           PIANO KEYS: build, light up, and play
+           White keys every 60px; black keys sit between them
+           except after E and B (pattern repeats every 7 keys).
+           =========================================== */
+        const WHITE_SEMI = [0, 2, 4, 5, 7, 9, 11];
+        let audioCtx = null;
+        function playTone(semi) {
+            try {
+                audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                const f = 130.81 * Math.pow(2, semi / 12); // C3 upward
+                const t = audioCtx.currentTime;
+                const g = audioCtx.createGain();
+                g.gain.setValueAtTime(0.0001, t);
+                g.gain.exponentialRampToValueAtTime(0.28, t + 0.01);
+                g.gain.exponentialRampToValueAtTime(0.0001, t + 1.8);
+                g.connect(audioCtx.destination);
+                [['triangle', 1, 1], ['sine', 2, 0.35], ['sine', 3, 0.12]].forEach(([type, mult, amp]) => {
+                    const o = audioCtx.createOscillator(); const og = audioCtx.createGain();
+                    o.type = type; o.frequency.value = f * mult; og.gain.value = amp;
+                    o.connect(og); og.connect(g); o.start(t); o.stop(t + 1.9);
+                });
+            } catch (e) { /* audio not available: the keys still animate */ }
+        }
+        const keysEl = document.getElementById('keys');
+        const whites = [];
+        (function buildKeys() {
+            const count = parseInt(keysEl.dataset.keys, 10) || 32;
+            for (let i = 0; i < count; i++) {
+                const semi = 12 * Math.floor(i / 7) + WHITE_SEMI[i % 7];
+                const w = document.createElement('div');
+                w.className = 'w'; w.style.left = (i * 60) + 'px';
+                w.addEventListener('pointerdown', () => { w.classList.add('down'); playTone(semi); });
+                ['pointerup', 'pointerleave'].forEach(ev => w.addEventListener(ev, () => w.classList.remove('down')));
+                keysEl.appendChild(w); whites.push(w);
+                if ([0, 1, 3, 4, 5].includes(i % 7)) {
+                    const b = document.createElement('div');
+                    b.className = 'b'; b.style.left = ((i + 1) * 60 - 17) + 'px';
+                    b.addEventListener('pointerdown', (e) => { e.stopPropagation(); b.classList.add('down'); playTone(semi + 1); });
+                    ['pointerup', 'pointerleave'].forEach(ev => b.addEventListener(ev, () => b.classList.remove('down')));
+                    keysEl.appendChild(b);
+                }
+            }
+        })();
+        /* A wave of light runs across the keys whenever the title slide appears */
+        function waveKeys() {
+            whites.forEach((w, i) => {
+                setTimeout(() => w.classList.add('lit'), 500 + i * 38);
+                setTimeout(() => w.classList.remove('lit'), 500 + i * 38 + 320);
+            });
+        }
+
+        /* ===========================================
+           COUNT-UP NUMBERS (slide 5)
+           =========================================== */
+        let countRaf = [];
+        function runCounts(slide) {
+            countRaf.forEach(cancelAnimationFrame); countRaf = [];
+            slide.querySelectorAll('.count').forEach((el, idx) => {
+                const to = parseInt(el.dataset.to, 10); el.textContent = '0';
+                const start = performance.now() + 500 + idx * 250, dur = 1500;
+                const tick = (now) => {
+                    const p = Math.max(0, Math.min(1, (now - start) / dur));
+                    el.textContent = Math.round(to * (1 - Math.pow(1 - p, 3)));
+                    if (p < 1) countRaf.push(requestAnimationFrame(tick));
+                };
+                countRaf.push(requestAnimationFrame(tick));
+            });
+        }
+
+        /* ===========================================
+           FEEDBACK SIMULATION (slide 4)
+           Eight notes; the fifth is wrong. Each app reacts differently:
+             Simply Piano: marks it at once and halts until corrected
+             XiaoYeZi:     plays through, then shows a report
+             Skoove:       no detection while performing
+           =========================================== */
+        let demoToken = null;
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        const NOTE_X = (i) => 90 + i * 150, BAD = 4;
+
+        function laneSetup(lane) {
+            const track = lane.querySelector('.track');
+            track.querySelectorAll('.note').forEach(n => n.remove());
+            for (let i = 0; i < 8; i++) {
+                const n = document.createElement('div'); n.className = 'note';
+                n.style.left = (NOTE_X(i) - 19) + 'px'; track.appendChild(n);
+            }
+            const head = lane.querySelector('.head');
+            head.style.transition = 'none'; head.style.left = '20px';
+            const say = lane.querySelector('.say'); say.className = 'say'; say.innerHTML = '';
+            return { notes: [...track.querySelectorAll('.note')], head, say };
+        }
+        function setSay(say, cls, html) { say.innerHTML = html; say.className = 'say show ' + cls; }
+
+        async function runLane(lane, tok) {
+            const kind = lane.dataset.kind;
+            const { notes, head, say } = laneSetup(lane);
+            await sleep(400); if (tok.stop) return;
+            head.style.transition = 'left 0.5s linear';
+            for (let i = 0; i < 8; i++) {
+                head.style.left = NOTE_X(i) + 'px'; await sleep(540); if (tok.stop) return;
+                if (kind === 'simply') {
+                    if (i === BAD) {
+                        notes[i].classList.add('bad'); setSay(say, 'bad', 'Wrong note: playback stops until it is corrected');
+                        await sleep(1700); if (tok.stop) return;
+                        notes[i].classList.remove('bad'); notes[i].classList.add('ok'); setSay(say, 'good', 'Corrected, continues');
+                        await sleep(500); if (tok.stop) return;
+                    } else notes[i].classList.add('ok');
+                } else { notes[i].classList.add('on'); }
+            }
+            if (kind === 'xiaoyezi') {
+                await sleep(500); if (tok.stop) return;
+                for (let i = 0; i < 8; i++) {
+                    notes[i].classList.remove('on'); notes[i].classList.add(i === BAD ? 'bad' : 'ok');
+                    await sleep(90); if (tok.stop) return;
+                }
+                setSay(say, '', '<span class="tg">tempo</span><span class="tg">notes</span><span class="tg">rhythm</span><span class="tg">completeness</span><span class="tg">smoothness</span>');
+            } else if (kind === 'skoove') {
+                setSay(say, 'mute', 'No note or rhythm detection: the student listens');
+            }
+        }
+        async function startDemo(slide) {
+            stopDemo();
+            const tok = { stop: false }; demoToken = tok;
+            await sleep(900);
+            while (!tok.stop) {
+                await Promise.all([...slide.querySelectorAll('.lane')].map(l => runLane(l, tok)));
+                if (tok.stop) return;
+                await sleep(4200);
+            }
+        }
+        function stopDemo() { if (demoToken) demoToken.stop = true; }
+
+        /* ===========================================
+           SLIDE PRESENTATION CONTROLLER
+           Stage scaling, click-to-build fragments, curtain-wipe
+           transitions, keyboard / touch / wheel navigation
+           =========================================== */
+        class SlidePresentation {
+            constructor() {
+                this.slides = [...document.querySelectorAll('.slide')];
+                this.stage = document.getElementById('deckStage');
+                this.wipe = document.getElementById('wipe');
+                this.progress = document.getElementById('progress');
+                this.current = 0; this.busy = false; this.pending = null; this.shown = new Map();
+                this.setupStageScale(); this.setupKeyboardNav(); this.setupTouchNav(); this.setupWheelNav(); this.setupSpotlight();
+                this.apply(0, 'fwd', true);
+            }
+
+            /* Scale the 1920x1080 stage uniformly to fit the window (letterbox, never reflow) */
+            setupStageScale() {
+                const scale = () => {
+                    const f = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+                    const x = (window.innerWidth - 1920 * f) / 2;
+                    const y = (window.innerHeight - 1080 * f) / 2;
+                    this.stage.style.transform = `translate(${x}px, ${y}px) scale(${f})`;
+                };
+                scale(); window.addEventListener('resize', scale);
+            }
+
+            /* Soft light that follows the cursor */
+            setupSpotlight() {
+                const spot = document.getElementById('spot');
+                document.addEventListener('mousemove', (e) => {
+                    const r = this.stage.getBoundingClientRect(); const s = r.width / 1920;
+                    spot.style.opacity = 1;
+                    spot.style.transform = `translate(${(e.clientX - r.left) / s}px, ${(e.clientY - r.top) / s}px)`;
+                });
+            }
+
+            setupKeyboardNav() {
+                document.addEventListener('keydown', (e) => {
+                    if (document.body.classList.contains('editing')) return;
+                    if (['ArrowRight', 'ArrowDown', 'PageDown', ' '].includes(e.key)) { e.preventDefault(); this.next(); }
+                    if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(e.key)) { e.preventDefault(); this.prev(); }
+                    if (e.key === 'Home') this.goTo(0, 'back');
+                    if (e.key === 'End') this.goTo(this.slides.length - 1, 'fwd');
+                });
+            }
+            setupTouchNav() {
+                let startX = 0;
+                document.addEventListener('touchstart', (e) => { startX = e.touches[0].clientX; }, { passive: true });
+                document.addEventListener('touchend', (e) => {
+                    const dx = e.changedTouches[0].clientX - startX;
+                    if (Math.abs(dx) > 50) dx < 0 ? this.next() : this.prev();
+                });
+            }
+            setupWheelNav() {
+                let locked = false;
+                document.addEventListener('wheel', (e) => {
+                    if (locked || document.body.classList.contains('editing')) return;
+                    locked = true; setTimeout(() => { locked = false; }, 700);
+                    e.deltaY > 0 ? this.next() : this.prev();
+                }, { passive: true });
+            }
+
+            frags(s) { return [...s.querySelectorAll('.frag')]; }
+
+            /* → reveals the next build step on the slide; when none are left, moves on */
+            next() {
+                const s = this.slides[this.current], f = this.frags(s), n = this.shown.get(s) || 0;
+                if (n < f.length) { f[n].classList.add('on'); this.shown.set(s, n + 1); return; }
+                this.goTo(this.current + 1, 'fwd');
+            }
+            prev() {
+                const s = this.slides[this.current], f = this.frags(s), n = this.shown.get(s) || 0;
+                if (n > 0) { f[n - 1].classList.remove('on'); this.shown.set(s, n - 1); return; }
+                this.goTo(this.current - 1, 'back');
+            }
+
+            goTo(i, dir) {
+                i = Math.max(0, Math.min(i, this.slides.length - 1));
+                if (i === this.current) return;
+                if (this.busy) { this.pending = [i, dir]; return; }
+                this.busy = true;
+                this.wipe.classList.remove('run'); void this.wipe.offsetWidth; this.wipe.classList.add('run');
+                setTimeout(() => this.apply(i, dir), 350);
+                setTimeout(() => {
+                    this.wipe.classList.remove('run'); this.busy = false;
+                    if (this.pending) { const [p, d] = this.pending; this.pending = null; this.goTo(p, d); }
+                }, 720);
+            }
+
+            /* .active controls visibility; .visible triggers the entrance animations */
+            apply(i, dir, first) {
+                if (!first) this.onLeave(this.slides[this.current]);
+                this.current = i;
+                this.slides.forEach((s, idx) => {
+                    s.classList.toggle('active', idx === i);
+                    s.classList.toggle('visible', idx === i);
+                });
+                const s = this.slides[i], f = this.frags(s);
+                f.forEach(el => el.classList.toggle('on', dir === 'back'));
+                this.shown.set(s, dir === 'back' ? f.length : 0);
+                this.progress.style.width = ((i + 1) / this.slides.length * 100) + '%';
+                this.onEnter(s);
+            }
+            onEnter(s) {
+                if (s.dataset.hook === 'keys') waveKeys();
+                if (s.querySelector('.lane')) startDemo(s);
+                if (s.querySelector('.count')) runCounts(s);
+            }
+            onLeave(s) { if (s.querySelector('.lane')) stopDemo(); }
+        }
+
+        const deck = new SlidePresentation();
+
+        /* ===========================================
+           PRESENTER TIMER: press T to show a 10-minute countdown, R to reset
+           =========================================== */
+        const timerEl = document.getElementById('timer');
+        const TOTAL = 10 * 60;
+        let t0 = null, timerInt = null;
+        function renderTimer() {
+            const left = TOTAL - Math.floor((Date.now() - t0) / 1000);
+            const a = Math.abs(left), m = Math.floor(a / 60), s = a % 60;
+            timerEl.textContent = (left < 0 ? '+' : '') + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+            timerEl.classList.toggle('low', left <= 120 && left >= 0);
+            timerEl.classList.toggle('over', left < 0);
+        }
+        function toggleTimer() {
+            if (timerEl.classList.toggle('show')) {
+                t0 = t0 || Date.now(); renderTimer(); timerInt = setInterval(renderTimer, 500);
+            } else { clearInterval(timerInt); }
+        }
+
+        /* ===========================================
+           INLINE EDITING
+           E key or top-left corner toggles edit mode; Ctrl+S saves a copy
+           =========================================== */
+        const EDITABLE = '.slide h1, .slide h2, .slide h3, .slide p, .slide li, .slide .name, .slide .aff, .slide .nm, .slide .sb';
+        const editor = {
+            isActive: false,
+            toggleEditMode() {
+                this.isActive = !this.isActive;
+                document.body.classList.toggle('editing', this.isActive);
+                document.getElementById('editToggle').classList.toggle('active', this.isActive);
+                document.querySelectorAll(EDITABLE).forEach(el => {
+                    this.isActive ? el.setAttribute('contenteditable', 'true') : el.removeAttribute('contenteditable');
+                });
+            },
+            save() {
+                const wasActive = this.isActive;
+                if (wasActive) this.toggleEditMode();
+                const html = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+                a.download = 'ai-piano-research-10min.html';
+                a.click(); URL.revokeObjectURL(a.href);
+                if (wasActive) this.toggleEditMode();
+            }
+        };
+
+        const hotzone = document.querySelector('.edit-hotzone');
+        const editToggle = document.getElementById('editToggle');
+        let hideTimeout = null;
+        const showToggle = () => { clearTimeout(hideTimeout); editToggle.classList.add('show'); };
+        const hideToggle = () => { hideTimeout = setTimeout(() => { if (!editor.isActive) editToggle.classList.remove('show'); }, 400); };
+        hotzone.addEventListener('mouseenter', showToggle);
+        hotzone.addEventListener('mouseleave', hideToggle);
+        editToggle.addEventListener('mouseenter', showToggle);
+        editToggle.addEventListener('mouseleave', hideToggle);
+        editToggle.addEventListener('click', () => editor.toggleEditMode());
+        hotzone.addEventListener('click', () => editor.toggleEditMode());
+
+        document.addEventListener('keydown', (e) => {
+            const typing = e.target.getAttribute && e.target.getAttribute('contenteditable') === 'true';
+            if (typing) { if (e.key === 'Escape') editor.toggleEditMode(); return; }
+            if (e.key === 'e' || e.key === 'E') editor.toggleEditMode();
+            if (e.key === 't' || e.key === 'T') toggleTimer();
+            if ((e.key === 'r' || e.key === 'R') && t0) { t0 = Date.now(); renderTimer(); }
+            if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); editor.save(); }
+            if (e.key === 'Escape' && editor.isActive) editor.toggleEditMode();
+        });
+    </script>
+</body>
+</html>
